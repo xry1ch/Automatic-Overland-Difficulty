@@ -138,6 +138,18 @@ function Addon:SetRegionSettings(regionId, difficulty)
     self:ApplyCurrentSituation()
 end
 
+function Addon:ResetRegionSettings()
+    if type(self.savedVars.regions) ~= "table" then
+        self.savedVars.regions = {}
+    else
+        for regionId in pairs(self.savedVars.regions) do
+            self.savedVars.regions[regionId] = nil
+        end
+    end
+
+    self:ApplyCurrentSituation()
+end
+
 function Addon:GetPlayerRegionId()
     local zoneIndex = GetUnitZoneIndex("player")
     if not zoneIndex then
@@ -253,6 +265,21 @@ function Addon:CreateSituationDropdown(situation, name, tooltip, choices, values
     }
 end
 
+function Addon:CreateResetRegionsButton()
+    return
+    {
+        type = "button",
+        name = "Reset Zones",
+        tooltip = "Set every zone override back to Do not change.",
+        func = function()
+            self:ResetRegionSettings()
+        end,
+        isDangerous = true,
+        warning = "Reset all zone difficulty settings to Do not change?",
+        width = "full",
+    }
+end
+
 function Addon:CreateRegionDropdown(regionId, regionName, choices, values)
     return
     {
@@ -297,7 +324,11 @@ function Addon:BuildRegionDropdownControls(choices, values)
         return left.name < right.name
     end)
 
-    local controls = {}
+    local controls =
+    {
+        self:CreateResetRegionsButton(),
+    }
+
     for index = 1, #regions do
         local region = regions[index]
         controls[#controls + 1] = self:CreateRegionDropdown(region.id, region.name, choices, values)
