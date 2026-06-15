@@ -1,5 +1,5 @@
 ## Title: Automatic Overland Difficulty
-## Version: 1.2.8
+## Version: 1.2.9
 ## APIVersion: 101050
 ## Author: |cFFFF00Wrynch|r
 ## Description: Automatically requests Challenge Difficulty changes for configured zone situations.

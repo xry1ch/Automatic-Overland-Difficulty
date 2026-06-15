@@ -9,12 +9,14 @@ local SAVED_VARS_NAME = "AODifficulty_SavedVariables"
 local SAVED_VARS_VERSION = 1
 
 local NO_CHANGE = -1
+local SAME_AS_WORLD_EVENTS = -2
 
 local SITUATION_DELVES = "delves"
 local SITUATION_PUBLIC_DUNGEONS = "publicDungeons"
 local SITUATION_OLD_GROUP_DUNGEONS = "groupDungeons"
 local SITUATION_OPEN_WORLD = "openWorld"
 
+local NEARBY_PIN_DRAGONS = "dragons"
 local NEARBY_PIN_WORLD_BOSSES = "worldBosses"
 local NEARBY_PIN_WORLD_EVENTS = "worldEvents"
 local NEARBY_UPDATE_NAMESPACE = EVENT_NAMESPACE .. "_NearbyPins"
@@ -44,6 +46,10 @@ local NEARBY_PIN_SETTINGS =
         name = "World Events",
         zoneCompletionType = ZONE_COMPLETION_TYPE_WORLD_EVENTS,
     },
+    {
+        key = NEARBY_PIN_DRAGONS,
+        name = "Dragons",
+    },
 }
 
 local SETTINGS_DEFAULTS =
@@ -61,6 +67,7 @@ local SETTINGS_DEFAULTS =
     },
     nearbyPins =
     {
+        [NEARBY_PIN_DRAGONS] = SAME_AS_WORLD_EVENTS,
         [NEARBY_PIN_WORLD_BOSSES] = NO_CHANGE,
         [NEARBY_PIN_WORLD_EVENTS] = NO_CHANGE,
     },
@@ -109,6 +116,17 @@ local function NormalizeDifficulty(value)
     return NO_CHANGE
 end
 
+local function NormalizeNearbyPinDifficulty(nearbyPin, value)
+    if nearbyPin == NEARBY_PIN_DRAGONS then
+        if VALID_DIFFICULTIES[value] then
+            return value
+        end
+        return SAME_AS_WORLD_EVENTS
+    end
+
+    return NormalizeDifficulty(value)
+end
+
 local function NormalizeNearbyPinRadiusMeters(value)
     local radiusMeters = tonumber(value)
     if not radiusMeters then
@@ -137,6 +155,28 @@ local function BuildDifficultyChoices()
     local values =
     {
         NO_CHANGE,
+        OVERLAND_DIFFICULTY_TYPE_BASEGAME,
+        OVERLAND_DIFFICULTY_TYPE_JOURNEYMAN,
+        OVERLAND_DIFFICULTY_TYPE_ADVENTURER,
+        OVERLAND_DIFFICULTY_TYPE_VETERAN,
+    }
+
+    return choices, values
+end
+
+local function BuildDragonDifficultyChoices()
+    local choices =
+    {
+        "Same as World Events",
+        GetString("SI_OVERLANDDIFFICULTYTYPE", OVERLAND_DIFFICULTY_TYPE_BASEGAME),
+        GetString("SI_OVERLANDDIFFICULTYTYPE", OVERLAND_DIFFICULTY_TYPE_JOURNEYMAN),
+        GetString("SI_OVERLANDDIFFICULTYTYPE", OVERLAND_DIFFICULTY_TYPE_ADVENTURER),
+        GetString("SI_OVERLANDDIFFICULTYTYPE", OVERLAND_DIFFICULTY_TYPE_VETERAN),
+    }
+
+    local values =
+    {
+        SAME_AS_WORLD_EVENTS,
         OVERLAND_DIFFICULTY_TYPE_BASEGAME,
         OVERLAND_DIFFICULTY_TYPE_JOURNEYMAN,
         OVERLAND_DIFFICULTY_TYPE_ADVENTURER,
@@ -214,18 +254,27 @@ end
 function Addon.GetNearbyPinSettings(nearbyPin)
     local savedVars = Addon.savedVars
     if not savedVars or type(savedVars.nearbyPins) ~= "table" then
+        if nearbyPin == NEARBY_PIN_DRAGONS then
+            return SAME_AS_WORLD_EVENTS
+        end
         return NO_CHANGE
     end
-    return NormalizeDifficulty(savedVars.nearbyPins[nearbyPin])
+
+    local value = savedVars.nearbyPins[nearbyPin]
+    if nearbyPin == NEARBY_PIN_DRAGONS and value == nil then
+        return SAME_AS_WORLD_EVENTS
+    end
+
+    return NormalizeNearbyPinDifficulty(nearbyPin, value)
 end
 
 function Addon.SetNearbyPinSettings(nearbyPin, difficulty)
-    difficulty = NormalizeDifficulty(difficulty)
+    difficulty = NormalizeNearbyPinDifficulty(nearbyPin, difficulty)
     if type(Addon.savedVars.nearbyPins) ~= "table" then
         Addon.savedVars.nearbyPins = {}
     end
 
-    if difficulty == NO_CHANGE then
+    if difficulty == NO_CHANGE and nearbyPin ~= NEARBY_PIN_DRAGONS then
         if rawget(Addon.savedVars.nearbyPins, nearbyPin) ~= nil then
             Addon.savedVars.nearbyPins[nearbyPin] = nil
         end
@@ -237,13 +286,26 @@ function Addon.SetNearbyPinSettings(nearbyPin, difficulty)
     Addon.ApplyCurrentSituation()
 end
 
+function Addon.GetEffectiveDragonSettings()
+    local dragonDifficulty = Addon.GetNearbyPinSettings(NEARBY_PIN_DRAGONS)
+    if dragonDifficulty == SAME_AS_WORLD_EVENTS then
+        return Addon.GetNearbyPinSettings(NEARBY_PIN_WORLD_EVENTS)
+    end
+    return dragonDifficulty
+end
+
 function Addon.HasNearbyPinSettings()
     if not Addon.savedVars or type(Addon.savedVars.nearbyPins) ~= "table" then
         return false
     end
 
     for index = 1, #NEARBY_PIN_SETTINGS do
-        if Addon.GetNearbyPinSettings(NEARBY_PIN_SETTINGS[index].key) ~= NO_CHANGE then
+        local nearbyPin = NEARBY_PIN_SETTINGS[index].key
+        if nearbyPin == NEARBY_PIN_DRAGONS then
+            if Addon.GetEffectiveDragonSettings() ~= NO_CHANGE then
+                return true
+            end
+        elseif Addon.GetNearbyPinSettings(nearbyPin) ~= NO_CHANGE then
             return true
         end
     end
@@ -257,6 +319,28 @@ function Addon.GetNearbyPinRadiusMeters()
         return DEFAULT_NEARBY_PIN_RADIUS_METERS
     end
     return NormalizeNearbyPinRadiusMeters(savedVars.nearbyPinRadiusMeters)
+end
+
+function Addon.GetPlayerPositionForNearbyCheck()
+    local gps = LibGPS3
+    if not gps or not gps.GetCurrentMapMeasurement or not gps.GetLocalDistanceInMeters then
+        return nil
+    end
+
+    if not DoesCurrentMapMatchMapForPlayerLocation() then
+        return nil
+    end
+
+    if not gps:GetCurrentMapMeasurement() then
+        return nil
+    end
+
+    local playerX, playerY, _, isPlayerShownInCurrentMap, isSymbolicLocation = GetMapPlayerPosition("player")
+    if not playerX or not playerY or not isPlayerShownInCurrentMap or isSymbolicLocation then
+        return nil
+    end
+
+    return gps, playerX, playerY
 end
 
 function Addon.SetNearbyPinRadiusMeters(radiusMeters)
@@ -303,24 +387,15 @@ function Addon.GetPlayerRegionId()
 end
 
 function Addon.IsCurrentPOIWithinRadius(zoneIndex, poiIndex)
-    local gps = LibGPS3
-    if not gps or not gps.GetCurrentMapMeasurement or not gps.GetLocalDistanceInMeters then
+    local gps, playerX, playerY = Addon.GetPlayerPositionForNearbyCheck()
+    if not gps then
         return false
     end
 
-    if not DoesCurrentMapMatchMapForPlayerLocation() then
-        return false
-    end
+    return Addon.IsPOIWithinRadius(zoneIndex, poiIndex, gps, playerX, playerY)
+end
 
-    if not gps:GetCurrentMapMeasurement() then
-        return false
-    end
-
-    local playerX, playerY, _, isPlayerShownInCurrentMap, isSymbolicLocation = GetMapPlayerPosition("player")
-    if not playerX or not playerY or not isPlayerShownInCurrentMap or isSymbolicLocation then
-        return false
-    end
-
+function Addon.IsPOIWithinRadius(zoneIndex, poiIndex, gps, playerX, playerY)
     local poiX, poiY, _, _, isPOIShownInCurrentMap = GetPOIMapInfo(zoneIndex, poiIndex)
     if not poiX or not poiY or not isPOIShownInCurrentMap then
         return false
@@ -329,21 +404,101 @@ function Addon.IsCurrentPOIWithinRadius(zoneIndex, poiIndex)
     return gps:GetLocalDistanceInMeters(playerX, playerY, poiX, poiY) <= Addon.GetNearbyPinRadiusMeters()
 end
 
+function Addon.IsCurrentWorldEventUnitWithinRadius(worldEventInstanceId, unitTag)
+    local gps, playerX, playerY = Addon.GetPlayerPositionForNearbyCheck()
+    if not gps then
+        return false
+    end
+
+    local unitX, unitY, _, isUnitShownInCurrentMap, isSymbolicLocation = GetMapPlayerPosition(unitTag)
+    if not unitX or not unitY or not isUnitShownInCurrentMap or isSymbolicLocation then
+        return false
+    end
+
+    local pinType = GetWorldEventInstanceUnitPinType(worldEventInstanceId, unitTag)
+    if pinType == MAP_PIN_TYPE_INVALID then
+        return false
+    end
+
+    return gps:GetLocalDistanceInMeters(playerX, playerY, unitX, unitY) <= Addon.GetNearbyPinRadiusMeters()
+end
+
+function Addon.GetNearbyDragonDifficulty()
+    local dragonDifficulty = Addon.GetEffectiveDragonSettings()
+    if dragonDifficulty == NO_CHANGE and Addon.GetNearbyPinSettings(NEARBY_PIN_DRAGONS) == SAME_AS_WORLD_EVENTS then
+        return nil
+    end
+
+    local worldEventInstanceId = GetNextWorldEventInstanceId(nil)
+    while worldEventInstanceId do
+        -- Verified in esoui/ingame/map/worldmap.lua: unit-context world events are currently dragons.
+        if GetWorldEventLocationContext(worldEventInstanceId) == WORLD_EVENT_LOCATION_CONTEXT_UNIT then
+            local numUnits = GetNumWorldEventInstanceUnits(worldEventInstanceId)
+            for unitIndex = 1, numUnits do
+                local unitTag = GetWorldEventInstanceUnitTag(worldEventInstanceId, unitIndex)
+                if unitTag and Addon.IsCurrentWorldEventUnitWithinRadius(worldEventInstanceId, unitTag) then
+                    return dragonDifficulty
+                end
+            end
+        end
+
+        worldEventInstanceId = GetNextWorldEventInstanceId(worldEventInstanceId)
+    end
+
+    return nil
+end
+
 function Addon.GetNearbyPinDifficulty()
     if not Addon.HasNearbyPinSettings() then
         return NO_CHANGE
     end
 
+    local dragonDifficulty = Addon.GetNearbyDragonDifficulty()
+    if dragonDifficulty ~= nil then
+        return dragonDifficulty
+    end
+
     local zoneIndex, poiIndex = GetCurrentSubZonePOIIndices()
     if not zoneIndex or not poiIndex then
-        return NO_CHANGE
+        return Addon.GetNearbyMapPOIDifficulty()
     end
 
     local zoneCompletionType = GetPOIZoneCompletionType(zoneIndex, poiIndex)
     for settingsIndex = 1, #NEARBY_PIN_SETTINGS do
         local pinSettings = NEARBY_PIN_SETTINGS[settingsIndex]
-        if zoneCompletionType == pinSettings.zoneCompletionType and Addon.IsCurrentPOIWithinRadius(zoneIndex, poiIndex) then
-            return Addon.GetNearbyPinSettings(pinSettings.key)
+        if pinSettings.zoneCompletionType and zoneCompletionType == pinSettings.zoneCompletionType and Addon.IsCurrentPOIWithinRadius(zoneIndex, poiIndex) then
+            local difficulty = Addon.GetNearbyPinSettings(pinSettings.key)
+            if difficulty ~= NO_CHANGE then
+                return difficulty
+            end
+        end
+    end
+
+    return Addon.GetNearbyMapPOIDifficulty()
+end
+
+function Addon.GetNearbyMapPOIDifficulty()
+    local gps, playerX, playerY = Addon.GetPlayerPositionForNearbyCheck()
+    if not gps then
+        return NO_CHANGE
+    end
+
+    local zoneIndex = GetCurrentMapZoneIndex()
+    if not zoneIndex then
+        return NO_CHANGE
+    end
+
+    local numPOIs = GetNumPOIs(zoneIndex)
+    for settingsIndex = 1, #NEARBY_PIN_SETTINGS do
+        local pinSettings = NEARBY_PIN_SETTINGS[settingsIndex]
+        local difficulty = Addon.GetNearbyPinSettings(pinSettings.key)
+        if pinSettings.zoneCompletionType and difficulty ~= NO_CHANGE then
+            for poiIndex = 1, numPOIs do
+                if GetPOIZoneCompletionType(zoneIndex, poiIndex) == pinSettings.zoneCompletionType
+                    and Addon.IsPOIWithinRadius(zoneIndex, poiIndex, gps, playerX, playerY) then
+                    return difficulty
+                end
+            end
         end
     end
 
@@ -372,9 +527,14 @@ function Addon.MigrateSavedVars()
     end
 
     for nearbyPin, difficulty in pairs(savedVars.nearbyPins) do
-        if NormalizeDifficulty(difficulty) == NO_CHANGE then
+        if nearbyPin == NEARBY_PIN_DRAGONS then
+            savedVars.nearbyPins[nearbyPin] = NormalizeNearbyPinDifficulty(nearbyPin, difficulty)
+        elseif NormalizeDifficulty(difficulty) == NO_CHANGE then
             savedVars.nearbyPins[nearbyPin] = nil
         end
+    end
+    if rawget(savedVars.nearbyPins, NEARBY_PIN_DRAGONS) == nil then
+        savedVars.nearbyPins[NEARBY_PIN_DRAGONS] = SETTINGS_DEFAULTS.nearbyPins[NEARBY_PIN_DRAGONS]
     end
 
     savedVars.announcements[ANNOUNCEMENT_CHAT] = savedVars.announcements[ANNOUNCEMENT_CHAT] == true
@@ -727,6 +887,7 @@ function Addon.RegisterSettings()
     local LAM = LibAddonMenu2
 
     local choices, values = BuildDifficultyChoices()
+    local dragonChoices, dragonValues = BuildDragonDifficultyChoices()
 
     local panelData =
     {
@@ -797,6 +958,7 @@ function Addon.RegisterSettings()
         ),
         Addon.CreateNearbyPinDropdown(NEARBY_PIN_SETTINGS[1], choices, values),
         Addon.CreateNearbyPinDropdown(NEARBY_PIN_SETTINGS[2], choices, values),
+        Addon.CreateNearbyPinDropdown(NEARBY_PIN_SETTINGS[3], dragonChoices, dragonValues),
         Addon.CreateNearbyPinRadiusSlider(),
         {
             type = "header",
