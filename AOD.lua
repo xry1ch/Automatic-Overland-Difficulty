@@ -883,6 +883,21 @@ function Addon.LoadActiveSettings()
     Addon.RefreshNearbyUpdateRegistration()
 end
 
+function Addon.LoadScopeSettings()
+    local profileName = GetProfileName()
+    Addon.scopeVars = ZO_SavedVars:NewCharacterIdSettings(SAVED_VARS_NAME, SAVED_VARS_VERSION, "Scope", nil, profileName)
+
+    if Addon.scopeVars.accountBoundSettings == nil then
+        -- This selector used to be account-wide. Copy the old value once when a character first gets its own scope.
+        local legacyScopeVars = ZO_SavedVars:NewAccountWide(SAVED_VARS_NAME, SAVED_VARS_VERSION, "Scope", nil, profileName)
+        if legacyScopeVars.accountBoundSettings ~= nil then
+            Addon.scopeVars.accountBoundSettings = legacyScopeVars.accountBoundSettings ~= false
+        end
+    end
+
+    Addon.scopeVars = ZO_SavedVars:NewCharacterIdSettings(SAVED_VARS_NAME, SAVED_VARS_VERSION, "Scope", SCOPE_DEFAULTS, profileName)
+end
+
 function Addon.RegisterSettings()
     local LAM = LibAddonMenu2
 
@@ -1040,8 +1055,7 @@ function Addon.RegisterEvents()
 end
 
 function Addon.Initialize()
-    local profileName = GetProfileName()
-    Addon.scopeVars = ZO_SavedVars:NewAccountWide(SAVED_VARS_NAME, SAVED_VARS_VERSION, "Scope", SCOPE_DEFAULTS, profileName)
+    Addon.LoadScopeSettings()
     Addon.LoadActiveSettings()
     Addon.lastObservedDifficulty = GetOverlandDifficulty()
     Addon.RegisterSettings()
